@@ -1,0 +1,6 @@
+{
+  "name": "Letter Writing Assistant",
+  "description": "A Peer Career Advisor & Mentor helping write thoughtful apology emails for missed coffee chats and networking opportunities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
