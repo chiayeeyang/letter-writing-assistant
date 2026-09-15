@@ -12,14 +12,23 @@ const PORT = 3000;
 
 app.use(express.json());
 
-// Lazy-initialized or standard initialized Gemini client
-const apiKey = process.env.GEMINI_API_KEY || '';
+// Extract Gemini API key with support for common env aliases
+function getApiKey(): string {
+  return (
+    process.env.GEMINI_API_KEY ||
+    process.env.GEMINI_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.API_KEY ||
+    ''
+  );
+}
 
 let aiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
   if (!aiClient) {
+    const key = getApiKey();
     aiClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY || '',
+      apiKey: key,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
@@ -35,7 +44,7 @@ app.get('/api/status', (req: Request, res: Response) => {
   res.json({
     status: 'ok',
     model: 'gemini-3.6-flash',
-    hasKey: Boolean(process.env.GEMINI_API_KEY),
+    hasKey: Boolean(getApiKey()),
     role: 'Peer Career Advisor / Mentor',
   });
 });
@@ -45,6 +54,8 @@ const CANDIDATE_MODELS = [
   'gemini-3.5-flash',
   'gemini-flash-latest',
   'gemini-3.1-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
 ];
 
 // Peer Career Advisor letter generation endpoint
@@ -56,7 +67,8 @@ app.post('/api/generate', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Prompt is required.' });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
+    const currentKey = getApiKey();
+    if (!currentKey) {
       return res.status(500).json({
         error:
           'GEMINI_API_KEY is not configured on the server. Please set GEMINI_API_KEY in your environment variables.',
@@ -92,15 +104,19 @@ app.post('/api/generate', async (req: Request, res: Response) => {
     for (const model of CANDIDATE_MODELS) {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
+          const config: any = {
+            systemInstruction: PEER_MENTOR_SYSTEM_INSTRUCTION,
+          };
+          if (model.startsWith('gemini-3')) {
+            config.thinkingConfig = {
+              thinkingLevel: ThinkingLevel?.LOW || 'LOW',
+            };
+          }
+
           response = await ai.models.generateContent({
             model,
             contents,
-            config: {
-              systemInstruction: PEER_MENTOR_SYSTEM_INSTRUCTION,
-              thinkingConfig: {
-                thinkingLevel: ThinkingLevel.LOW,
-              },
-            },
+            config,
           });
           if (response?.text) {
             successfulModel = model;
@@ -121,7 +137,7 @@ app.post('/api/generate', async (req: Request, res: Response) => {
             break;
           }
           if (attempt < 2) {
-            await new Promise((r) => setTimeout(r, 800));
+            await new Promise((r) => setTimeout(r, 600));
             continue;
           }
         }
@@ -147,12 +163,22 @@ app.post('/api/generate', async (req: Request, res: Response) => {
       userFriendlyMsg = 'The AI service has temporarily reached its rate limit. Please wait a few moments and retry.';
     } else if (userFriendlyMsg.includes('503')) {
       userFriendlyMsg = 'The AI service is experiencing high temporary demand. Please retry in a few moments.';
+    } else if (userFriendlyMsg.includes('API_KEY_INVALID') || userFriendlyMsg.includes('401') || userFriendlyMsg.includes('403')) {
+      userFriendlyMsg = 'Invalid or unauthorized GEMINI_API_KEY. Please verify that your API key is active and has Gemini API enabled.';
     }
 
     return res.status(500).json({
       error: userFriendlyMsg,
     });
   }
+});
+
+// Global Express error handler to guarantee JSON responses
+app.use((err: any, req: Request, res: Response, next: any) => {
+  console.error('Unhandled server error:', err);
+  res.status(err?.status || 500).json({
+    error: err?.message || 'A server error occurred. Please try again.',
+  });
 });
 
 // Vite middleware & production static serving setup

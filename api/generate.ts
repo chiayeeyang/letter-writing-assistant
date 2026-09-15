@@ -1,11 +1,22 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-import { PEER_MENTOR_SYSTEM_INSTRUCTION } from '../prompt.ts';
+import { PEER_MENTOR_SYSTEM_INSTRUCTION } from './prompt.ts';
+
+function getApiKey(): string {
+  return (
+    process.env.GEMINI_API_KEY ||
+    process.env.GEMINI_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.API_KEY ||
+    ''
+  );
+}
 
 let aiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
   if (!aiClient) {
+    const key = getApiKey();
     aiClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY || '',
+      apiKey: key,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
@@ -17,21 +28,36 @@ function getGeminiClient(): GoogleGenAI {
 }
 
 export default async function handler(req: any, res: any) {
+  // Ensure response always has JSON content-type header
+  if (res.setHeader) {
+    res.setHeader('Content-Type', 'application/json');
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed. Use POST.' });
   }
 
   try {
-    const { prompt, history } = req.body || {};
+    let body = req.body;
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body);
+      } catch (e) {
+        // use raw body
+      }
+    }
+
+    const { prompt, history } = body || {};
 
     if (!prompt || typeof prompt !== 'string') {
       return res.status(400).json({ error: 'Prompt is required.' });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
+    const currentKey = getApiKey();
+    if (!currentKey) {
       return res.status(500).json({
         error:
-          'GEMINI_API_KEY is not configured. Please set GEMINI_API_KEY in your Vercel Environment Variables.',
+          'GEMINI_API_KEY is not configured. Please set GEMINI_API_KEY in your Vercel Project Settings > Environment Variables, then redeploy.',
       });
     }
 
@@ -60,26 +86,33 @@ export default async function handler(req: any, res: any) {
       'gemini-3.5-flash',
       'gemini-flash-latest',
       'gemini-3.1-flash-lite',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
     ];
 
     let response: any = null;
     let lastError: any = null;
     let successfulModel = '';
 
-    // Cascade through candidate models to absorb 429 quota exhaustion or 503 temporary spikes
+    // Cascade through candidate models to absorb rate limits or model version availability differences
     for (const model of CANDIDATE_MODELS) {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
+          const config: any = {
+            systemInstruction: PEER_MENTOR_SYSTEM_INSTRUCTION,
+          };
+          if (model.startsWith('gemini-3')) {
+            config.thinkingConfig = {
+              thinkingLevel: ThinkingLevel?.LOW || 'LOW',
+            };
+          }
+
           response = await ai.models.generateContent({
             model,
             contents,
-            config: {
-              systemInstruction: PEER_MENTOR_SYSTEM_INSTRUCTION,
-              thinkingConfig: {
-                thinkingLevel: ThinkingLevel.LOW,
-              },
-            },
+            config,
           });
+
           if (response?.text) {
             successfulModel = model;
             break;
@@ -98,7 +131,7 @@ export default async function handler(req: any, res: any) {
             break;
           }
           if (attempt < 2) {
-            await new Promise((r) => setTimeout(r, 800));
+            await new Promise((r) => setTimeout(r, 600));
             continue;
           }
         }
@@ -112,7 +145,7 @@ export default async function handler(req: any, res: any) {
 
     return res.status(200).json({ text: response.text, model: successfulModel });
   } catch (error: any) {
-    console.error('Gemini generation error on Vercel:', error);
+    console.error('Gemini generation error:', error);
 
     let userFriendlyMsg = error?.message || 'An error occurred during letter generation.';
     if (
@@ -123,6 +156,8 @@ export default async function handler(req: any, res: any) {
       userFriendlyMsg = 'The AI service has temporarily reached its rate limit. Please wait a few moments and retry.';
     } else if (userFriendlyMsg.includes('503')) {
       userFriendlyMsg = 'The AI service is experiencing high temporary demand. Please retry in a few moments.';
+    } else if (userFriendlyMsg.includes('API_KEY_INVALID') || userFriendlyMsg.includes('401') || userFriendlyMsg.includes('403')) {
+      userFriendlyMsg = 'Invalid or unauthorized GEMINI_API_KEY. Please check that your key in environment variables is valid.';
     }
 
     return res.status(500).json({

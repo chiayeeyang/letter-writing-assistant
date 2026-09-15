@@ -40,7 +40,28 @@ export default function App() {
         }),
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      let data: any = null;
+
+      if (contentType.includes('application/json')) {
+        try {
+          data = await response.json();
+        } catch (jsonErr) {
+          console.warn('Failed to parse JSON response:', jsonErr);
+        }
+      }
+
+      if (!data) {
+        const rawText = await response.text().catch(() => '');
+        if (rawText.toLowerCase().includes('server error')) {
+          throw new Error(
+            'The server encountered an issue processing the request. If you are running on Vercel, verify that GEMINI_API_KEY is configured in your Vercel Project Settings > Environment Variables, and redeploy.'
+          );
+        }
+        throw new Error(
+          rawText || `Server responded with status code ${response.status}.`
+        );
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to generate letter response.');
