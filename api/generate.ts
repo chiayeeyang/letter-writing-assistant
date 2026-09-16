@@ -83,7 +83,7 @@ export default async function handler(req: any, res: any) {
       parts: [{ text: prompt }],
     });
 
-    const CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+    const CANDIDATE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash'];
 
     let response: any = null;
     let lastError: any = null;
