@@ -1,5 +1,3 @@
-import { PEER_MENTOR_SYSTEM_INSTRUCTION } from './prompt.ts';
-
 type GeminiClient = import('@google/genai').GoogleGenAI;
 
 function getApiKey(): string {
@@ -40,6 +38,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
+    const { PEER_MENTOR_SYSTEM_INSTRUCTION } = await import('./prompt.ts');
     let body = req.body;
     if (typeof body === 'string') {
       try {
