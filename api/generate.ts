@@ -1,5 +1,6 @@
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { PEER_MENTOR_SYSTEM_INSTRUCTION } from './prompt.ts';
+
+type GeminiClient = import('@google/genai').GoogleGenAI;
 
 function getApiKey(): string {
   return (
@@ -11,9 +12,10 @@ function getApiKey(): string {
   );
 }
 
-let aiClient: GoogleGenAI | null = null;
-function getGeminiClient(): GoogleGenAI {
+let aiClient: GeminiClient | null = null;
+async function getGeminiClient(): Promise<GeminiClient> {
   if (!aiClient) {
+    const { GoogleGenAI } = await import('@google/genai');
     const key = getApiKey();
     aiClient = new GoogleGenAI({
       apiKey: key,
@@ -61,7 +63,7 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const ai = getGeminiClient();
+    const ai = await getGeminiClient();
 
     const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
 
@@ -81,14 +83,7 @@ export default async function handler(req: any, res: any) {
       parts: [{ text: prompt }],
     });
 
-    const CANDIDATE_MODELS = [
-      'gemini-3.6-flash',
-      'gemini-3.5-flash',
-      'gemini-flash-latest',
-      'gemini-3.1-flash-lite',
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-lite',
-    ];
+    const CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
     let response: any = null;
     let lastError: any = null;
@@ -98,19 +93,12 @@ export default async function handler(req: any, res: any) {
     for (const model of CANDIDATE_MODELS) {
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          const config: any = {
-            systemInstruction: PEER_MENTOR_SYSTEM_INSTRUCTION,
-          };
-          if (model.startsWith('gemini-3')) {
-            config.thinkingConfig = {
-              thinkingLevel: ThinkingLevel?.LOW || 'LOW',
-            };
-          }
-
           response = await ai.models.generateContent({
             model,
             contents,
-            config,
+            config: {
+              systemInstruction: PEER_MENTOR_SYSTEM_INSTRUCTION,
+            },
           });
 
           if (response?.text) {
